@@ -16,47 +16,114 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-bl_addon_info = {
-    "name": "K2-Silverlight Mesh/Clip",
+# <pep8-80 compliant>
+
+
+bl_info = {
+    "name": "K2 Model/Animation Import-Export",
     "author": "Anton Romanov",
-    "version": (1, 0),
-    "blender": (2, 5, 3),
-    "api": 31667,
-    "location": "File > Import-Export > K2 model/clip ",
-    "description": "Import K2/Silverlight Model/Clip (.model/.clip formats)",
+    "version": (0, 1),
+    "blender": (2, 5, 7),
+    "location": "File > Import-Export > K2 model/clip",
+    "description": "Import-Export meshes and animations used by K2 engine (Savage 2 and Heroes of Newerth games)",
     "warning": "",
-    "wiki_url": "",
-    "tracker_url": "",
+    "wiki_url": "https://github.com/theli-ua/K2-Blender/wiki",
+    "tracker_url": "https://github.com/theli-ua/K2-Blender/issues",
     "category": "Import-Export"}
 
 if "bpy" in locals():
     import imp
-    imp.reload(k2_import)
-    #imp.reload(export_raw)
+    if "k2_import" in locals():
+        imp.reload(k2_import)
+    #if "export_raw" in locals():
+        #imp.reload(export_raw)
 else:
-    from . import k2_import
-    #from . import export_raw
+    import bpy
 
+from bpy.props import StringProperty, BoolProperty
 
-import bpy
+class K2Importer(bpy.types.Operator):
+    '''Load K2/Silverlight mesh/clip data'''
+    bl_idname = "import_mesh.k2"
+    bl_label = "Import k2"
+
+    filepath = StringProperty(
+            subtype='FILE_PATH',
+            )
+    filter_glob = StringProperty(default="*.model", options={'HIDDEN'})
+
+    def execute(self, context):
+        from . import k2_import
+        k2_import.read(self.filepath)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        wm.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+#class RawExporter(bpy.types.Operator):
+    #'''Save Raw triangle mesh data'''
+    #bl_idname = "export_mesh.raw"
+    #bl_label = "Export RAW"
+
+    #filepath = StringProperty(
+            #subtype='FILE_PATH',
+            #)
+    #check_existing = BoolProperty(
+            #name="Check Existing",
+            #description="Check and warn on overwriting existing files",
+            #default=True,
+            #options={'HIDDEN'},
+            #)
+    #apply_modifiers = BoolProperty(
+            #name="Apply Modifiers",
+            #description="Use transformed mesh data from each object",
+            #default=True,
+            #)
+    #triangulate = BoolProperty(
+            #name="Triangulate",
+            #description="Triangulate quads",
+            #default=True,
+            #)
+
+    #def execute(self, context):
+        #from . import export_raw
+        #export_raw.write(self.filepath,
+                         #self.apply_modifiers,
+                         #self.triangulate,
+                         #)
+
+        #return {'FINISHED'}
+
+    #def invoke(self, context, event):
+        #if not self.filepath:
+            #self.filepath = bpy.path.ensure_ext(bpy.data.filepath, ".raw")
+        #wm = context.window_manager
+        #wm.fileselect_add(self)
+        #return {'RUNNING_MODAL'}
+
 
 def menu_import(self, context):
-    self.layout.operator(k2_import.K2Importer.bl_idname, text="K2/Silverlight Model/clip (.model/.clip formats)").filepath = "*.model|*.clip"
+    self.layout.operator(K2Importer.bl_idname, text="K2 mesh (.model)")
 
 
 #def menu_export(self, context):
-#    import os
-#    default_path = os.path.splitext(bpy.data.filepath)[0] + ".raw"
-#    self.layout.operator(export_raw.RawExporter.bl_idname, text="Raw Faces (.raw)").filepath = default_path
+    #self.layout.operator(RawExporter.bl_idname, text="Raw Faces (.raw)")
 
 
 def register():
+    bpy.utils.register_module(__name__)
+
     bpy.types.INFO_MT_file_import.append(menu_import)
-#    bpy.types.INFO_MT_file_export.append(menu_export)
+    #bpy.types.INFO_MT_file_export.append(menu_export)
+
 
 def unregister():
+    bpy.utils.unregister_module(__name__)
+
     bpy.types.INFO_MT_file_import.remove(menu_import)
-#    bpy.types.INFO_MT_file_export.remove(menu_export)
+    #bpy.types.INFO_MT_file_export.remove(menu_export)
 
 if __name__ == "__main__":
     register()
