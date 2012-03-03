@@ -252,18 +252,8 @@ def CreateBlenderMesh(filename, objname):
         edit_bone.use_local_location = True
         edit_bone.use_inherit_rotation = True
         matrix = roundMatrix(matrix,4)
-        #(trans, rot, scale) = matrix.decompose()
         edit_bone.head = matrix[3].xyz
-        #edit_bone.tail = edit_bone.head + trans
-        #edit_bone.roll = rot.to_euler().z
         edit_bone.length = 1
-        #edit_bone.transform(roundMatrix(matrix,4))
-        #edit_bone.use_connect=False
-        #print (edit_bone.head)
-        #print (edit_bone.tail)
-        #print (edit_bone.roll)
-        #print (edit_bone.matrix)
-        #print (edit_bone.length)
         parents.append(parent_bone_index)
         bones.append(edit_bone)
     for i in range(num_bones):
@@ -341,7 +331,7 @@ def CreateBlenderMesh(filename, objname):
                 break
             if honchunk.getname == b'mesh':
                 break
-            elif mode != 1 and SKIP_NON_PHYSIQUE_MESHES:
+            elif mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
                 honchunk.skip()
             else:
                 if honchunk.getname() == b'vrts':
@@ -431,32 +421,95 @@ def CreateBlenderMesh(filename, objname):
 
     scn.update()
     return ( obj, rig )
+############################## 
+#CLIPS
+##############################
+    
+
+MKEY_X,MKEY_Y,MKEY_Z,\
+MKEY_PITCH,MKEY_ROLL,MKEY_YAW,\
+MKEY_VISIBILITY,\
+MKEY_SCALE_X,MKEY_SCALE_Y,MKEY_SCALE_Z \
+    = range(10)
 
 
 
-#def addMeshObj(mesh, objName):
-    #scn = bpy.context.scene
+def CreateBlenderClip(filename,clipname):
+    file = open(filename,'rb')
+    if not file:
+        log("can't open file")
+        return
+    sig = file.read(4)
+    if sig != b'CLIP':
+        err('unknown file signature')
+        return
 
-    #for o in scn.objects:
-        #o.select = False
+    try:
+        clipchunk = chunk.Chunk(file,bigendian=0,align=0)
+    except EOFError:
+        log('error reading first chunk')
+        return
+    version = read_int(clipchunk)
+    num_bones = read_int(clipchunk)
+    num_frames = read_int(clipchunk)
+    vlog ("version: %d" % version)
+    vlog ("num bones: %d" % num_bones)
+    vlog ("num frames: %d" % num_frames)
+    
 
-    #mesh.update()
-    #mesh.validate()
+    #objList = Blender.Object.GetSelected()
+    #if len(objList) != 1:
+        #err('select needed armature only')
+    #armOb = objList[0]
+    #action = Blender.Armature.NLA.NewAction(clipname)
+    #action.setActive(armOb)
+    #pose = armOb.getPose()
+    #armature = armOb.getData()
+    armOb = bpy.context.selected_objects[0]
+    armOb.animation_data_create()
+    action = bpy.data.actions.new(name=clipname)
+    armOb.animation_data.action = action
+    
+    bone_index = -1
+    motions = {}
+    
 
-    #nobj = bpy.data.objects.new(objName, mesh)
-    #scn.objects.link(nobj)
-    #nobj.select = True
+    while 1:
+        try:
+            clipchunk = chunk.Chunk(file,bigendian=0,align=0)
+        except EOFError:
+            vlog('error reading chunk')
+            break
+        if version == 1:
+            name = clipchunk.read(32)
+            if '\0' in name:
+                name = name[:name.index('\0')]
+        boneindex = read_int(clipchunk)
+        keytype = read_int(clipchunk)
+        numkeys = read_int(clipchunk)
+        if version > 1:
+            namelength = struct.unpack("B",clipchunk.read(1))[0]
+            name = clipchunk.read(namelength)
+            clipchunk.read(1)
+            
+        if name not in motions:
+            motions[name] = {}
+        dlog ("%s,boneindex: %d,keytype: %d,numkeys: %d" % \
+            (name,boneindex,keytype,numkeys))
+        if keytype == MKEY_VISIBILITY:
+            data = struct.unpack("%dB"  % numkeys,clipchunk.read(numkeys))
+        else:
+            data = struct.unpack("<%df" % numkeys,clipchunk.read(numkeys * 4))
+        motions[name][keytype] = list(data)
+        clipchunk.skip()
 
-    #if scn.objects.active is None or scn.objects.active.mode == 'OBJECT':
-        #scn.objects.active = nobj
 
-def CreateBlenderClip(filename,objName):
-    dlog('Importing clip')
+def readclip(filepath):
+    objName = bpy.path.display_name_from_filepath(filepath)
+    CreateBlenderClip(filepath, objName)
 
 def read(filepath):
-    #convert the filename to an object name
     objName = bpy.path.display_name_from_filepath(filepath)
     CreateBlenderMesh(filepath, objName)
-    #addMeshObj(mesh, objName)
 
 # package manages registering

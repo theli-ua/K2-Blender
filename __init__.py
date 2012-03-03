@@ -42,10 +42,30 @@ else:
 
 from bpy.props import StringProperty, BoolProperty
 
+class K2ImporterClip(bpy.types.Operator):
+    '''Load K2/Silverlight mesh data'''
+    bl_idname = "import_clip.k2"
+    bl_label = "Import K2 Clip"
+
+    filepath = StringProperty(
+            subtype='FILE_PATH',
+            )
+    filter_glob = StringProperty(default="*.clip", options={'HIDDEN'})
+
+    def execute(self, context):
+        from . import k2_import
+        k2_import.readclip(self.filepath)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        wm.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
 class K2Importer(bpy.types.Operator):
-    '''Load K2/Silverlight mesh/clip data'''
+    '''Load K2/Silverlight mesh data'''
     bl_idname = "import_mesh.k2"
-    bl_label = "Import k2"
+    bl_label = "Import K2 Mesh"
 
     filepath = StringProperty(
             subtype='FILE_PATH',
@@ -106,6 +126,7 @@ class K2Importer(bpy.types.Operator):
 
 def menu_import(self, context):
     self.layout.operator(K2Importer.bl_idname, text="K2 mesh (.model)")
+    self.layout.operator(K2ImporterClip.bl_idname, text="K2 clip (.clip)")
 
 
 #def menu_export(self, context):
