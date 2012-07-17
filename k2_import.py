@@ -15,8 +15,8 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-from mathutils import Vector, Matrix
-
+from mathutils import Vector, Matrix, Euler
+import math
 # determines the verbosity of loggin.
 #   0 - no logging (fatal errors are still printed)
 #   1 - standard logging
@@ -40,6 +40,144 @@ import bpy
 import struct,chunk
 
 from bpy.props import *
+
+#########################################
+## "Visual Transform" helper functions ##
+#########################################
+
+def get_pose_matrix_in_other_space(mat, pose_bone):
+    """ Returns the transform matrix relative to pose_bone's current
+        transform space.  In other words, presuming that mat is in
+        armature space, slapping the returned matrix onto pose_bone
+        should give it the armature-space transforms of mat.
+        TODO: try to handle cases with axis-scaled parents better.
+    """
+    rest = pose_bone.bone.matrix_local.copy()
+    rest_inv = rest.inverted()
+    if pose_bone.parent:
+        par_mat = pose_bone.parent.matrix.copy()
+        par_inv = pose_bone.parent.matrix.inverted()
+        par_rest = pose_bone.parent.bone.matrix_local.copy()
+    else:
+        par_mat = Matrix()
+        par_inv = Matrix()
+        par_rest = Matrix()
+
+    # Get matrix in bone's current transform space
+    smat = rest_inv * (par_rest * (par_inv * mat))
+
+    # Compensate for non-inherited rotation/scale
+    if not pose_bone.bone.use_inherit_rotation:
+        loc = mat.to_translation()
+        loc -= (par_mat*(par_rest.inverted() * rest)).to_translation()
+        loc *= rest.inverted().to_quaternion()
+        if pose_bone.bone.use_inherit_scale:
+            t = par_mat.to_scale()
+            par_scale = Matrix().Scale(t[0], 4, Vector((1,0,0)))
+            par_scale *= Matrix().Scale(t[1], 4, Vector((0,1,0)))
+            par_scale *= Matrix().Scale(t[2], 4, Vector((0,0,1)))
+        else:
+            par_scale = Matrix()
+
+        smat = rest_inv * mat * par_scale.inverted()
+        smat[3][0] = loc[0]
+        smat[3][1] = loc[1]
+        smat[3][2] = loc[2]
+    elif not pose_bone.bone.use_inherit_scale:
+        loc = smat.to_translation()
+        rot = smat.to_quaternion()
+        scl = mat.to_scale()
+
+        smat = Matrix().Scale(scl[0], 4, Vector((1,0,0)))
+        smat *= Matrix().Scale(scl[1], 4, Vector((0,1,0)))
+        smat *= Matrix().Scale(scl[2], 4, Vector((0,0,1)))
+        smat *= Matrix.Rotation(rot.angle, 4, rot.axis)
+        smat[3][0] = loc[0]
+        smat[3][1] = loc[1]
+        smat[3][2] = loc[2]
+
+    # Compensate for non-local location
+    if not pose_bone.bone.use_local_location:
+        loc = smat.to_translation() * (par_rest.inverted() * rest).to_quaternion()
+        smat[3][0] = loc[0]
+        smat[3][1] = loc[1]
+        smat[3][2] = loc[2]
+
+    return smat
+
+
+def get_local_pose_matrix(pose_bone):
+    """ Returns the local transform matrix of the given pose bone.
+    """
+    return get_pose_matrix_in_other_space(pose_bone.matrix, pose_bone)
+
+
+def set_pose_translation(pose_bone, mat):
+    """ Sets the pose bone's translation to the same translation as the given matrix.
+        Matrix should be given in bone's local space.
+    """
+    pose_bone.location = mat.to_translation()
+
+
+def set_pose_rotation(pose_bone, mat):
+    """ Sets the pose bone's rotation to the same rotation as the given matrix.
+        Matrix should be given in bone's local space.
+    """
+    q = mat.to_quaternion()
+
+    if pose_bone.rotation_mode == 'QUATERNION':
+        pose_bone.rotation_quaternion = q
+    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
+        pose_bone.rotation_axis_angle[0] = q.angle
+        pose_bone.rotation_axis_angle[1] = q.axis[0]
+        pose_bone.rotation_axis_angle[2] = q.axis[1]
+        pose_bone.rotation_axis_angle[3] = q.axis[2]
+    else:
+        pose_bone.rotation_euler = q.to_euler(pose_bone.rotation_mode)
+
+
+def set_pose_scale(pose_bone, mat):
+    """ Sets the pose bone's scale to the same scale as the given matrix.
+        Matrix should be given in bone's local space.
+    """
+    pose_bone.scale = mat.to_scale()
+
+
+def match_pose_translation(pose_bone, target_bone):
+    """ Matches pose_bone's visual translation to target_bone's visual
+        translation.
+        This function assumes you are in pose mode on the relevant armature.
+    """
+    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
+    set_pose_translation(pose_bone, mat)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='POSE')
+
+
+def match_pose_rotation(pose_bone, target_bone):
+    """ Matches pose_bone's visual rotation to target_bone's visual
+        rotation.
+        This function assumes you are in pose mode on the relevant armature.
+    """
+    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
+    set_pose_rotation(pose_bone, mat)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='POSE')
+
+
+def match_pose_scale(pose_bone, target_bone):
+    """ Matches pose_bone's visual scale to target_bone's visual
+        scale.
+        This function assumes you are in pose mode on the relevant armature.
+    """
+    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
+    set_pose_scale(pose_bone, mat)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='POSE')
+
+
+
+
 def read_int(honchunk):
     return struct.unpack("<i",honchunk.read(4))[0]
 def read_float(honchunk):
@@ -54,8 +192,11 @@ def parse_links(honchunk,bone_names):
     vgroups = {}
     for i in range(numverts):
         num_weights = read_int(honchunk)
-        weights = struct.unpack("<%df" % num_weights,honchunk.read(num_weights * 4))
-        indexes = struct.unpack("<%dI" % num_weights,honchunk.read(num_weights * 4))
+        if num_weights > 0:
+            weights = struct.unpack("<%df" % num_weights,honchunk.read(num_weights * 4))
+            indexes = struct.unpack("<%dI" % num_weights,honchunk.read(num_weights * 4))
+        else:
+            weights = indexes = []
         for ii, index in enumerate(indexes):
             name = bone_names[index]
             if name not in vgroups:
@@ -139,6 +280,28 @@ def roundMatrix(mat,dec=17):
     for row in mat:
         fmat.append(roundVector(row,dec))
     return Matrix(fmat)    
+def vec_roll_to_mat3(vec, roll):
+    target = Vector((0,1,0))
+    nor = vec.normalized()
+    axis = target.cross(nor)
+    if axis.dot(axis) > 0.000001:
+        axis.normalize()
+        theta = target.angle(nor)
+        bMatrix = Matrix.Rotation(theta, 3, axis)
+    else:
+        updown = 1 if target.dot(nor) > 0 else -1
+        bMatrix = Matrix.Scale(updown, 3)
+    rMatrix = Matrix.Rotation(roll, 3, nor)
+    mat = rMatrix * bMatrix
+    return mat
+
+def mat3_to_vec_roll(mat):
+    vec = mat.col[1]
+    vecmat = vec_roll_to_mat3(mat.col[1], 0)
+    vecmatinv = vecmat.inverted()
+    rollmat = vecmatinv * mat
+    roll = math.atan2(rollmat[0][2], rollmat[2][2])
+    return vec, roll
 
 def CreateBlenderMesh(filename, objname):
     file = open(filename,'rb')
@@ -248,14 +411,20 @@ def CreateBlenderMesh(filename, objname):
         name = name.decode()
         log("bone name: %s,parent %d" % (name,parent_bone_index))
         bone_names.append(name)
-        edit_bone = armature_data.edit_bones.new(name)
-        edit_bone.use_local_location = True
-        edit_bone.use_inherit_rotation = True
+        matrix.transpose()
         matrix = roundMatrix(matrix,4)
-        edit_bone.head = matrix[3].xyz
-        edit_bone.length = 1
+        pos = matrix.to_translation()
+        #pos = Vector(matrix[3][:3])
+        axis, roll = mat3_to_vec_roll(matrix.to_3x3())
+        bone = armature_data.edit_bones.new(name)
+        print(matrix)
+        print(pos)
+        bone.head = pos
+        bone.tail = pos + axis
+        bone.roll = roll
+        print ('coool')
         parents.append(parent_bone_index)
-        bones.append(edit_bone)
+        bones.append(bone)
     for i in range(num_bones):
         if parents[i] != -1:
             bones[i].parent = bones[parents[i]]
@@ -432,6 +601,151 @@ MKEY_VISIBILITY,\
 MKEY_SCALE_X,MKEY_SCALE_Y,MKEY_SCALE_Z \
     = range(10)
 
+def bone_depth(bone):
+    if not bone.parent:
+        return 0
+    else:
+        return 1+bone_depth(bone.parent)
+        
+def getTransformMatrix(motions,bone,i,version):
+    motion = motions[bone.name]
+    #translation
+    if i >= len(motion[MKEY_X]):
+        x = motion[MKEY_X][-1]
+    else:
+        x = motion[MKEY_X][i]
+    
+    if i >= len(motion[MKEY_Y]):
+        y = motion[MKEY_Y][-1]
+    else:
+        y = motion[MKEY_Y][i]
+    
+    if i >= len(motion[MKEY_Z]):
+        z = motion[MKEY_Z][-1]
+    else:
+        z = motion[MKEY_Z][i]
+
+    #rotation
+    if i >= len(motion[MKEY_PITCH]):
+        rx = motion[MKEY_PITCH][-1]
+    else:
+        rx = motion[MKEY_PITCH][i]
+    
+    if i >= len(motion[MKEY_ROLL]):
+        ry = motion[MKEY_ROLL][-1]
+    else:
+        ry = motion[MKEY_ROLL][i]
+
+    if i >= len(motion[MKEY_YAW]):
+        rz = motion[MKEY_YAW][-1]
+    else:
+        rz = motion[MKEY_YAW][i]
+    
+    #scaling
+    if version == 1:
+        if i >= len(motion[MKEY_SCALE_X]):
+            sx = motion[MKEY_SCALE_X][-1]
+        else:
+            sx = motion[MKEY_SCALE_X][i]
+        sy = sz = sx
+    else:
+        if i >= len(motion[MKEY_SCALE_X]):
+            sx = motion[MKEY_SCALE_X][-1]
+        else:
+            sx = motion[MKEY_SCALE_X][i]
+        
+        if i >= len(motion[MKEY_SCALE_Y]):
+            sy = motion[MKEY_SCALE_Y][-1]
+        else:
+            sy = motion[MKEY_SCALE_Y][i]
+
+        if i >= len(motion[MKEY_SCALE_Z]):
+            sz = motion[MKEY_SCALE_Z][-1]
+        else:
+            sz = motion[MKEY_SCALE_Z][i]
+    scale = Vector([sx,sy,sz])
+    bone_rotation_matrix = Euler((math.radians(rx),math.radians(ry),math.radians(rz)),'YXZ').to_matrix().to_4x4()
+
+    bone_rotation_matrix = Matrix.Translation(\
+        Vector((x,y,z))) * bone_rotation_matrix
+
+    return bone_rotation_matrix,scale
+    
+def AnimateBone(name,pose,motions,num_frames,armature,armOb,version):
+    if name not in armature.bones.keys():
+        log ('%s not found in armature' % name)
+        return
+    motion = motions[name]
+    bone = armature.bones[name]
+    bone_rest_matrix = Matrix(bone.matrix_local)
+    print(name)
+    print('rest',bone_rest_matrix)
+    
+    if bone.parent is not None:
+            parent_bone = bone.parent
+            parent_rest_bone_matrix = Matrix(parent_bone.matrix_local)
+            print('parent ',parent_rest_bone_matrix)
+            parent_rest_bone_matrix.invert()
+            #bone_rest_matrix *= parent_rest_bone_matrix
+            bone_rest_matrix = parent_rest_bone_matrix * bone_rest_matrix
+    
+    bone_rest_matrix_inv = Matrix(bone_rest_matrix)
+    print('1rest inv with parent',bone_rest_matrix_inv)
+    bone_rest_matrix_inv.invert()
+
+    print('rest inv with parent',bone_rest_matrix_inv)
+
+    pbone = pose.bones[name]
+    #pbone.rotation_mode = 'XYZ'
+    prev_euler = Euler()
+    #num_frames = 1
+    for i in range(0, num_frames):
+        transform,size = getTransformMatrix(motions,bone,i,version)
+        print ('transform')
+        print (transform)
+        #x = 1/0
+        #transform = get_pose_matrix_in_other_space(transform,pbone)
+        #transform *= bone_rest_matrix_inv
+        transform = bone_rest_matrix_inv * transform
+        print('final transform')
+        print(transform)
+        #pbone.matrix = bone_rest_matrix_inv * transform - bone_rest_matrix
+        #pbone.matrix = get_pose_matrix_in_other_space(transform,pbone)
+        #pbone.matrix = transform
+        #pbone.matrix = bone_rest_matrix_inv * transform
+        #pbone.matrix = bone_rest_matrix_inv * transform
+
+
+        #x = 1/0
+
+        #pbone.scale = scale
+
+        #bone_rotation_matrix = bone_rest_matrix_inv * bone_rotation_matrix * bone_rest_matrix
+        #euler = bone_rotation_matrix.to_euler('ZXY', prev_euler)
+        #euler = bone_rotation_matrix.to_euler()
+        #dlog(euler)
+        #pbone.rotation_euler = euler
+        pbone.rotation_quaternion = transform.to_quaternion()
+        #pbone.rotation_euler = Euler((90.0,45.0,32.0))
+        #prev_euler = euler
+
+        #pbone.location =  (bone_rest_matrix_inv * bone_translation_matrix - bone_rest_matrix).to_translation()
+        #pbone.location =  (bone_rest_matrix_inv * bone_translation_matrix).to_translation()
+        #pbone.location =  (bone_translation_matrix - bone_rest_matrix).to_translation()
+        #pbone.location =  (bone_translation_matrix * bone_rest_matrix_inv).to_translation()
+        #pbone.location = transform.to_translation()
+        #if i == 0:
+        #print((name,i))
+        #dlog(pbone.matrix_channel)
+        #dlog(bone_translation_matrix)
+        #dlog(pbone.location)
+        #print('___________')
+        pbone.location =  (transform).to_translation()
+
+        #pbone.keyframe_insert(data_path='rotation_euler',frame=i)
+        pbone.keyframe_insert(data_path='rotation_quaternion',frame=i+1)
+        pbone.keyframe_insert(data_path='location',frame=i+1)
+        #pbone.keyframe_insert(data_path='scale',frame=i)
 
 
 def CreateBlenderClip(filename,clipname):
@@ -467,8 +781,10 @@ def CreateBlenderClip(filename,clipname):
     #armature = armOb.getData()
     armOb = bpy.context.selected_objects[0]
     armOb.animation_data_create()
+    armature = armOb.data
     action = bpy.data.actions.new(name=clipname)
     armOb.animation_data.action = action
+    pose = armOb.pose
     
     bone_index = -1
     motions = {}
@@ -478,7 +794,6 @@ def CreateBlenderClip(filename,clipname):
         try:
             clipchunk = chunk.Chunk(file,bigendian=0,align=0)
         except EOFError:
-            vlog('error reading chunk')
             break
         if version == 1:
             name = clipchunk.read(32)
@@ -491,6 +806,7 @@ def CreateBlenderClip(filename,clipname):
             namelength = struct.unpack("B",clipchunk.read(1))[0]
             name = clipchunk.read(namelength)
             clipchunk.read(1)
+        name = name.decode("utf8")
             
         if name not in motions:
             motions[name] = {}
@@ -502,7 +818,10 @@ def CreateBlenderClip(filename,clipname):
             data = struct.unpack("<%df" % numkeys,clipchunk.read(numkeys * 4))
         motions[name][keytype] = list(data)
         clipchunk.skip()
-
+    #file read, now animate that bastard!
+    for bone_name in motions:
+        AnimateBone(bone_name,pose,motions,num_frames,armature,armOb,version)
+    #pose.update()
 
 def readclip(filepath):
     objName = bpy.path.display_name_from_filepath(filepath)
