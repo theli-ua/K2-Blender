@@ -41,143 +41,6 @@ import struct,chunk
 
 from bpy.props import *
 
-#########################################
-## "Visual Transform" helper functions ##
-#########################################
-
-def get_pose_matrix_in_other_space(mat, pose_bone):
-    """ Returns the transform matrix relative to pose_bone's current
-        transform space.  In other words, presuming that mat is in
-        armature space, slapping the returned matrix onto pose_bone
-        should give it the armature-space transforms of mat.
-        TODO: try to handle cases with axis-scaled parents better.
-    """
-    rest = pose_bone.bone.matrix_local.copy()
-    rest_inv = rest.inverted()
-    if pose_bone.parent:
-        par_mat = pose_bone.parent.matrix.copy()
-        par_inv = pose_bone.parent.matrix.inverted()
-        par_rest = pose_bone.parent.bone.matrix_local.copy()
-    else:
-        par_mat = Matrix()
-        par_inv = Matrix()
-        par_rest = Matrix()
-
-    # Get matrix in bone's current transform space
-    smat = rest_inv * (par_rest * (par_inv * mat))
-
-    # Compensate for non-inherited rotation/scale
-    if not pose_bone.bone.use_inherit_rotation:
-        loc = mat.to_translation()
-        loc -= (par_mat*(par_rest.inverted() * rest)).to_translation()
-        loc *= rest.inverted().to_quaternion()
-        if pose_bone.bone.use_inherit_scale:
-            t = par_mat.to_scale()
-            par_scale = Matrix().Scale(t[0], 4, Vector((1,0,0)))
-            par_scale *= Matrix().Scale(t[1], 4, Vector((0,1,0)))
-            par_scale *= Matrix().Scale(t[2], 4, Vector((0,0,1)))
-        else:
-            par_scale = Matrix()
-
-        smat = rest_inv * mat * par_scale.inverted()
-        smat[3][0] = loc[0]
-        smat[3][1] = loc[1]
-        smat[3][2] = loc[2]
-    elif not pose_bone.bone.use_inherit_scale:
-        loc = smat.to_translation()
-        rot = smat.to_quaternion()
-        scl = mat.to_scale()
-
-        smat = Matrix().Scale(scl[0], 4, Vector((1,0,0)))
-        smat *= Matrix().Scale(scl[1], 4, Vector((0,1,0)))
-        smat *= Matrix().Scale(scl[2], 4, Vector((0,0,1)))
-        smat *= Matrix.Rotation(rot.angle, 4, rot.axis)
-        smat[3][0] = loc[0]
-        smat[3][1] = loc[1]
-        smat[3][2] = loc[2]
-
-    # Compensate for non-local location
-    if not pose_bone.bone.use_local_location:
-        loc = smat.to_translation() * (par_rest.inverted() * rest).to_quaternion()
-        smat[3][0] = loc[0]
-        smat[3][1] = loc[1]
-        smat[3][2] = loc[2]
-
-    return smat
-
-
-def get_local_pose_matrix(pose_bone):
-    """ Returns the local transform matrix of the given pose bone.
-    """
-    return get_pose_matrix_in_other_space(pose_bone.matrix, pose_bone)
-
-
-def set_pose_translation(pose_bone, mat):
-    """ Sets the pose bone's translation to the same translation as the given matrix.
-        Matrix should be given in bone's local space.
-    """
-    pose_bone.location = mat.to_translation()
-
-
-def set_pose_rotation(pose_bone, mat):
-    """ Sets the pose bone's rotation to the same rotation as the given matrix.
-        Matrix should be given in bone's local space.
-    """
-    q = mat.to_quaternion()
-
-    if pose_bone.rotation_mode == 'QUATERNION':
-        pose_bone.rotation_quaternion = q
-    elif pose_bone.rotation_mode == 'AXIS_ANGLE':
-        pose_bone.rotation_axis_angle[0] = q.angle
-        pose_bone.rotation_axis_angle[1] = q.axis[0]
-        pose_bone.rotation_axis_angle[2] = q.axis[1]
-        pose_bone.rotation_axis_angle[3] = q.axis[2]
-    else:
-        pose_bone.rotation_euler = q.to_euler(pose_bone.rotation_mode)
-
-
-def set_pose_scale(pose_bone, mat):
-    """ Sets the pose bone's scale to the same scale as the given matrix.
-        Matrix should be given in bone's local space.
-    """
-    pose_bone.scale = mat.to_scale()
-
-
-def match_pose_translation(pose_bone, target_bone):
-    """ Matches pose_bone's visual translation to target_bone's visual
-        translation.
-        This function assumes you are in pose mode on the relevant armature.
-    """
-    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
-    set_pose_translation(pose_bone, mat)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='POSE')
-
-
-def match_pose_rotation(pose_bone, target_bone):
-    """ Matches pose_bone's visual rotation to target_bone's visual
-        rotation.
-        This function assumes you are in pose mode on the relevant armature.
-    """
-    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
-    set_pose_rotation(pose_bone, mat)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='POSE')
-
-
-def match_pose_scale(pose_bone, target_bone):
-    """ Matches pose_bone's visual scale to target_bone's visual
-        scale.
-        This function assumes you are in pose mode on the relevant armature.
-    """
-    mat = get_pose_matrix_in_other_space(target_bone.matrix, pose_bone)
-    set_pose_scale(pose_bone, mat)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='POSE')
-
-
-
-
 def read_int(honchunk):
     return struct.unpack("<i",honchunk.read(4))[0]
 def read_float(honchunk):
@@ -413,8 +276,7 @@ def CreateBlenderMesh(filename, objname):
         bone_names.append(name)
         matrix.transpose()
         matrix = roundMatrix(matrix,4)
-        pos = matrix.to_translation()
-        #pos = Vector(matrix[3][:3])
+        pos = matrix.translation
         axis, roll = mat3_to_vec_roll(matrix.to_3x3())
         bone = armature_data.edit_bones.new(name)
         print(matrix)
@@ -678,74 +540,25 @@ def AnimateBone(name,pose,motions,num_frames,armature,armOb,version):
     motion = motions[name]
     bone = armature.bones[name]
     bone_rest_matrix = Matrix(bone.matrix_local)
-    print(name)
-    print('rest',bone_rest_matrix)
     
     if bone.parent is not None:
             parent_bone = bone.parent
             parent_rest_bone_matrix = Matrix(parent_bone.matrix_local)
-            print('parent ',parent_rest_bone_matrix)
             parent_rest_bone_matrix.invert()
-            #bone_rest_matrix *= parent_rest_bone_matrix
             bone_rest_matrix = parent_rest_bone_matrix * bone_rest_matrix
     
     bone_rest_matrix_inv = Matrix(bone_rest_matrix)
-    print('1rest inv with parent',bone_rest_matrix_inv)
     bone_rest_matrix_inv.invert()
 
-    print('rest inv with parent',bone_rest_matrix_inv)
-
     pbone = pose.bones[name]
-    #pbone.rotation_mode = 'XYZ'
     prev_euler = Euler()
-    #num_frames = 1
     for i in range(0, num_frames):
         transform,size = getTransformMatrix(motions,bone,i,version)
-        print ('transform')
-        print (transform)
-        #x = 1/0
-        #transform = get_pose_matrix_in_other_space(transform,pbone)
-        #transform *= bone_rest_matrix_inv
         transform = bone_rest_matrix_inv * transform
-        print('final transform')
-        print(transform)
-        #pbone.matrix = bone_rest_matrix_inv * transform - bone_rest_matrix
-        #pbone.matrix = get_pose_matrix_in_other_space(transform,pbone)
-        #pbone.matrix = transform
-        #pbone.matrix = bone_rest_matrix_inv * transform
-        #pbone.matrix = bone_rest_matrix_inv * transform
-
-
-        #x = 1/0
-
-        #pbone.scale = scale
-
-        #bone_rotation_matrix = bone_rest_matrix_inv * bone_rotation_matrix * bone_rest_matrix
-        #euler = bone_rotation_matrix.to_euler('ZXY', prev_euler)
-        #euler = bone_rotation_matrix.to_euler()
-        #dlog(euler)
-        #pbone.rotation_euler = euler
         pbone.rotation_quaternion = transform.to_quaternion()
-        #pbone.rotation_euler = Euler((90.0,45.0,32.0))
-        #prev_euler = euler
-
-        #pbone.location =  (bone_rest_matrix_inv * bone_translation_matrix - bone_rest_matrix).to_translation()
-        #pbone.location =  (bone_rest_matrix_inv * bone_translation_matrix).to_translation()
-        #pbone.location =  (bone_translation_matrix - bone_rest_matrix).to_translation()
-        #pbone.location =  (bone_translation_matrix * bone_rest_matrix_inv).to_translation()
-        #pbone.location = transform.to_translation()
-        #if i == 0:
-        #print((name,i))
-        #dlog(pbone.matrix_channel)
-        #dlog(bone_translation_matrix)
-        #dlog(pbone.location)
-        #print('___________')
         pbone.location =  (transform).to_translation()
-
-        #pbone.keyframe_insert(data_path='rotation_euler',frame=i)
         pbone.keyframe_insert(data_path='rotation_quaternion',frame=i+1)
         pbone.keyframe_insert(data_path='location',frame=i+1)
-        #pbone.keyframe_insert(data_path='scale',frame=i)
 
 
 def CreateBlenderClip(filename,clipname):
