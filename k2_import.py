@@ -557,8 +557,8 @@ def AnimateBone(name,pose,motions,num_frames,armature,armOb,version):
         transform = bone_rest_matrix_inv * transform
         pbone.rotation_quaternion = transform.to_quaternion()
         pbone.location =  (transform).to_translation()
-        pbone.keyframe_insert(data_path='rotation_quaternion',frame=i+1)
-        pbone.keyframe_insert(data_path='location',frame=i+1)
+        pbone.keyframe_insert(data_path='rotation_quaternion',frame=i)
+        pbone.keyframe_insert(data_path='location',frame=i)
 
 
 def CreateBlenderClip(filename,clipname):
