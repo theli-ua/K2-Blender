@@ -279,12 +279,9 @@ def CreateBlenderMesh(filename, objname):
         pos = matrix.translation
         axis, roll = mat3_to_vec_roll(matrix.to_3x3())
         bone = armature_data.edit_bones.new(name)
-        print(matrix)
-        print(pos)
         bone.head = pos
         bone.tail = pos + axis
         bone.roll = roll
-        print ('coool')
         parents.append(parent_bone_index)
         bones.append(bone)
     for i in range(num_bones):
@@ -593,7 +590,8 @@ def CreateBlenderClip(filename,clipname):
     #pose = armOb.getPose()
     #armature = armOb.getData()
     armOb = bpy.context.selected_objects[0]
-    armOb.animation_data_create()
+    if not armOb.animation_data:
+        armOb.animation_data_create()
     armature = armOb.data
     action = bpy.data.actions.new(name=clipname)
     armOb.animation_data.action = action

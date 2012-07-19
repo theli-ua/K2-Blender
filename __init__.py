@@ -23,7 +23,7 @@ bl_info = {
     "name": "K2 Model/Animation Import-Export",
     "author": "Anton Romanov",
     "version": (0, 1),
-    "blender": (2, 5, 7),
+    "blender": (2, 6, 3),
     "location": "File > Import-Export > K2 model/clip",
     "description": "Import-Export meshes and animations used by K2 engine (Savage 2 and Heroes of Newerth games)",
     "warning": "",
@@ -35,15 +35,15 @@ if "bpy" in locals():
     import imp
     if "k2_import" in locals():
         imp.reload(k2_import)
-    #if "export_raw" in locals():
-        #imp.reload(export_raw)
+    if "k2_export" in locals():
+        imp.reload(k2_export)
 else:
     import bpy
 
 from bpy.props import StringProperty, BoolProperty
 
 class K2ImporterClip(bpy.types.Operator):
-    '''Load K2/Silverlight mesh data'''
+    '''Load K2/Silverlight clip data'''
     bl_idname = "import_clip.k2"
     bl_label = "Import K2 Clip"
 
@@ -82,46 +82,41 @@ class K2Importer(bpy.types.Operator):
         wm.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
-#class RawExporter(bpy.types.Operator):
-    #'''Save Raw triangle mesh data'''
-    #bl_idname = "export_mesh.raw"
-    #bl_label = "Export RAW"
+class K2MeshExporter(bpy.types.Operator):
+    '''Save K2 triangle mesh data'''
+    bl_idname = "export_mesh.k2"
+    bl_label = "Export K2 Mesh"
 
-    #filepath = StringProperty(
-            #subtype='FILE_PATH',
-            #)
-    #check_existing = BoolProperty(
-            #name="Check Existing",
-            #description="Check and warn on overwriting existing files",
-            #default=True,
-            #options={'HIDDEN'},
-            #)
-    #apply_modifiers = BoolProperty(
-            #name="Apply Modifiers",
-            #description="Use transformed mesh data from each object",
-            #default=True,
-            #)
-    #triangulate = BoolProperty(
-            #name="Triangulate",
-            #description="Triangulate quads",
-            #default=True,
-            #)
+    filepath = StringProperty(
+            subtype='FILE_PATH',
+            )
+    filter_glob = StringProperty(default="*.model", options={'HIDDEN'})
+    check_existing = BoolProperty(
+            name="Check Existing",
+            description="Check and warn on overwriting existing files",
+            default=True,
+            options={'HIDDEN'},
+            )
+    apply_modifiers = BoolProperty(
+            name="Apply Modifiers",
+            description="Use transformed mesh data from each object",
+            default=True,
+            )
 
-    #def execute(self, context):
-        #from . import export_raw
-        #export_raw.write(self.filepath,
-                         #self.apply_modifiers,
-                         #self.triangulate,
-                         #)
+    def execute(self, context):
+        from . import k2_export
+        k2_export.export_k2_mesh(self.filepath,
+                self.apply_modifiers
+                         )
 
-        #return {'FINISHED'}
+        return {'FINISHED'}
 
-    #def invoke(self, context, event):
-        #if not self.filepath:
-            #self.filepath = bpy.path.ensure_ext(bpy.data.filepath, ".raw")
-        #wm = context.window_manager
-        #wm.fileselect_add(self)
-        #return {'RUNNING_MODAL'}
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = bpy.path.ensure_ext(bpy.data.filepath, ".model")
+        wm = context.window_manager
+        wm.fileselect_add(self)
+        return {'RUNNING_MODAL'}
 
 
 def menu_import(self, context):
@@ -129,22 +124,22 @@ def menu_import(self, context):
     self.layout.operator(K2ImporterClip.bl_idname, text="K2 clip (.clip)")
 
 
-#def menu_export(self, context):
-    #self.layout.operator(RawExporter.bl_idname, text="Raw Faces (.raw)")
+def menu_export(self, context):
+    self.layout.operator(K2MeshExporter.bl_idname, text="K2 Mesh (.model)")
 
 
 def register():
     bpy.utils.register_module(__name__)
 
     bpy.types.INFO_MT_file_import.append(menu_import)
-    #bpy.types.INFO_MT_file_export.append(menu_export)
+    bpy.types.INFO_MT_file_export.append(menu_export)
 
 
 def unregister():
     bpy.utils.unregister_module(__name__)
 
     bpy.types.INFO_MT_file_import.remove(menu_import)
-    #bpy.types.INFO_MT_file_export.remove(menu_export)
+    bpy.types.INFO_MT_file_export.remove(menu_export)
 
 if __name__ == "__main__":
     register()
