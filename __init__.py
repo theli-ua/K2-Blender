@@ -40,7 +40,7 @@ if "bpy" in locals():
 else:
     import bpy
 
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty
 
 class K2ImporterClip(bpy.types.Operator):
     '''Load K2/Silverlight clip data'''
@@ -78,6 +78,41 @@ class K2Importer(bpy.types.Operator):
         return {'FINISHED'}
 
     def invoke(self, context, event):
+        wm = context.window_manager
+        wm.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+class K2ClipExporter(bpy.types.Operator):
+    '''Save K2 triangle clip data'''
+    bl_idname = "export_clip.k2"
+    bl_label = "Export K2 Clip"
+
+    filepath = StringProperty(
+            subtype='FILE_PATH',
+            )
+    filter_glob = StringProperty(default="*.clip", options={'HIDDEN'})
+    check_existing = BoolProperty(
+            name="Check Existing",
+            description="Check and warn on overwriting existing files",
+            default=True,
+            options={'HIDDEN'},
+            )
+    apply_modifiers = BoolProperty(
+            name="Apply Modifiers",
+            description="Use transformed mesh data from each object",
+            default=True,
+            )
+    frame_start = IntProperty(name="Start Frame", description="Starting frame for the animation", default=bpy.context.scene.frame_start)
+    frame_end = IntProperty(name="Ending Frame", description="Ending frame for the animation",default=bpy.context.scene.frame_end)
+    def execute(self, context):
+        from . import k2_export
+        k2_export.export_k2_clip(self.filepath,self.apply_modifiers,
+                self.frame_start,self.frame_end)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = bpy.path.ensure_ext(bpy.data.filepath, ".clip")
         wm = context.window_manager
         wm.fileselect_add(self)
         return {'RUNNING_MODAL'}
@@ -126,6 +161,7 @@ def menu_import(self, context):
 
 def menu_export(self, context):
     self.layout.operator(K2MeshExporter.bl_idname, text="K2 Mesh (.model)")
+    self.layout.operator(K2ClipExporter.bl_idname, text="K2 Clip (.clip)")
 
 
 def register():

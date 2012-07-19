@@ -185,7 +185,7 @@ def face_to_vertices(faces,fdata,verts):
 
 def create_bone_data(armature,armMatrix,transform):
     bones = []
-    for bone in sorted(armature.bones.values(),key=lambda x: bone_depth(x)):
+    for bone in sorted(armature.bones.values(),key=bone_depth):
         bones.append(bone.name)
     bonedata = BytesIO()
     
@@ -349,4 +349,101 @@ def export_k2_mesh(filename, applyMods):
             write_block(file,"colr",create_colr_data(colr,meshindex))
         meshindex+=1
         vlog('total vertices duplicated: %d' % (len(vert) - len(mesh.verts)))
-        
+############################## 
+#CLIPS
+##############################
+    
+MKEY_X,MKEY_Y,MKEY_Z,\
+MKEY_PITCH,MKEY_ROLL,MKEY_YAW,\
+MKEY_VISIBILITY,\
+MKEY_SCALE_X,MKEY_SCALE_Y,MKEY_SCALE_Z, \
+MKEY_COUNT \
+    = range(11)
+
+from math import sqrt,atan2,degrees
+
+def ClipBone(file,bone_name,motion,index):
+    for keytype in range(MKEY_COUNT):
+        keydata = BytesIO()
+        key = motion[keytype]
+        #if keytype != MKEY_VISIBILITY:
+            #key = map(lambda k: round(k,ROUND_KEYS), key)
+        if min(key) == max(key):
+            key = [key[0]]
+        numkeys = len(key)
+        keydata.write(struct.pack("<i",index))
+        keydata.write(struct.pack("<i",keytype))
+        keydata.write(struct.pack("<i",numkeys))
+        keydata.write(struct.pack("B",len(bone_name)))
+        keydata.write(bone_name)
+        keydata.write(struct.pack("B",0))
+        if keytype == MKEY_VISIBILITY:
+            keydata.write(struct.pack('%dB' % numkeys,*key))
+        else:
+            keydata.write(struct.pack('<%df' % numkeys,*key))
+        write_block(file,'bmtn',keydata.getvalue())
+
+def export_k2_clip(filename, transform,frame_start,frame_end):
+    objList = bpy.context.selected_objects
+    if len(objList) != 1 or objList[0].type != 'ARMATURE':
+        err('Select needed armature only')
+        return
+    armob = objList[0]
+    motions = {}
+    vlog ('baking animation')
+    armature = armob.data
+    if transform:
+        worldmat = armob.matrix_world
+    else:
+        worldmat = Matrix([1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1])
+    scene = bpy.context.scene
+    pose = armob.pose
+
+
+    for frame in range(frame_start,frame_end):
+        scene.frame_set(frame)
+        for bone in pose.bones.values():
+            matrix = bone.matrix
+            if bone.parent:
+                matrix = matrix * (bone.parent.matrix.copy().inverted())
+            else:
+                matrix = matrix * worldmat
+            if bone.name not in motions:
+                motions[bone.name] = []
+                for i in range(MKEY_COUNT):
+                    motions[bone.name].append([])
+            motion = motions[bone.name]
+
+            translation = matrix.translation
+            rotation = matrix.to_euler('YXZ')
+            scale = matrix.to_scale()
+            visibility = 255
+            
+            motion[MKEY_X].append(translation[0])
+            motion[MKEY_Y].append(translation[1])
+            motion[MKEY_Z].append(translation[2])
+            
+            motion[MKEY_PITCH].append(-degrees(rotation[0]))
+            motion[MKEY_ROLL].append(-degrees(rotation[1]))
+            motion[MKEY_YAW].append(-degrees(rotation[2]))
+            
+            motion[MKEY_SCALE_X].append(scale[0])
+            motion[MKEY_SCALE_Y].append(scale[1])
+            motion[MKEY_SCALE_Z].append(scale[2])
+            
+            motion[MKEY_VISIBILITY].append(visibility)
+            
+    headdata = BytesIO()
+    headdata.write(struct.pack("<i",2))
+    headdata.write(struct.pack("<i",len(motions.keys())))
+    headdata.write(struct.pack("<i",frame_end - frame_start))
+
+    file = open(filename, 'wb')
+    file.write(b'CLIP')
+    write_block(file,'head',headdata.getvalue())
+    
+    index = 0
+    for bone_name in sorted(armature.bones.keys(),key=lambda x:bone_depth(armature.bones[x])):
+        ClipBone(file,bone_name.encode('utf8'),motions[bone_name],index)
+        index+=1
+    file.close()
