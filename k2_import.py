@@ -37,7 +37,9 @@ def err(msg):
     log(msg)
 
 import bpy
+import bmesh
 import struct,chunk
+import itertools
 
 from bpy.props import *
 
@@ -67,16 +69,6 @@ def parse_links(honchunk,bone_names):
             vgroups[name].append( (i,weights[ii] ) )
     honchunk.skip()
     return vgroups
-
-def createTextureLayer(name, me, texFaces):
-    uvtex = me.uv_textures.new()
-    uvtex.name = name
-    for n,tf in enumerate(texFaces):
-        datum = uvtex.data[n]
-        datum.uv1 = tf[0]
-        datum.uv2 = tf[1]
-        datum.uv3 = tf[2]
-    return uvtex
 
 def parse_vertices(honchunk):
     vlog('parsing vertices chunk')
@@ -166,7 +158,7 @@ def mat3_to_vec_roll(mat):
     roll = math.atan2(rollmat[0][2], rollmat[2][2])
     return vec, roll
 
-def CreateBlenderMesh(filename, objname):
+def CreateBlenderMesh(filename, objname,flipuv):
     file = open(filename,'rb')
     if not file:
         log("can't open file")
@@ -228,7 +220,6 @@ def CreateBlenderMesh(filename, objname):
     #armature.envelopes = False
     #armature.vertexGroups = True
        
-    #bpy.ops.object.editmode_toggle()
     bpy.ops.object.mode_set(mode='EDIT')
 
     bones = []
@@ -344,20 +335,13 @@ def CreateBlenderMesh(filename, objname):
         meshname = meshname.decode()
         materialname = materialname.decode()
 
-        if mode == 1 or not False:#SKIP_NON_PHYSIQUE_MESHES:
-            msh = bpy.data.meshes.new(meshname)
-
-            #msh = bpy.data.meshes.new(meshname)
-            #msh.mode |= Blender.Mesh.Modes.AUTOSMOOTH
-            #obj = scn.objects.new(msh)
-
         while 1:
             try:
                 honchunk = chunk.Chunk(file,bigendian=0,align=0)
             except EOFError:
                 vlog('error reading chunk')
                 break
-            if honchunk.getname == b'mesh':
+            if honchunk.getname() == b'mesh':
                 break
             elif mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
                 honchunk.skip()
@@ -381,15 +365,15 @@ def CreateBlenderMesh(filename, objname):
                     honchunk.skip()
         if mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
             continue
+        
+        msh = bpy.data.meshes.new(name=meshname)
+        msh.from_pydata(verts, [], faces)
+        msh.update()
 
            
-        msh.materials.append(bpy.data.materials.new(materialname))
+        #msh.materials.append(bpy.data.materials.new(materialname))
 
-        msh.from_pydata( verts, [], faces )
-        msh.update(calc_edges=True)
-
-         
-        if True:#flipuv:
+        if flipuv:
             for t in range(len(texc)):
                 texc[t] = ( texc[t][0], 1-texc[t][1] )
 
@@ -397,13 +381,15 @@ def CreateBlenderMesh(filename, objname):
         # Generate texCoords for faces
         texcoords = []
         for face in faces:
-            texcoords.append( [ texc[vert_id] for vert_id in face ] )
+            texcoords.extend( [ texc[vert_id] for vert_id in face ] )
             
-        uvMain = createTextureLayer("UVMain", msh, texcoords)
+        #uvMain = createTextureLayer("UVMain", msh, texcoords)
                         
-        for vertex, normal in zip(msh.vertices, nrml):
-            vertex.normal = normal
-        
+        uvtex = msh.uv_textures.new()
+        uvtex.name = 'UVMain' + meshname
+        uvloop = msh.uv_layers[-1]
+        for n,f in enumerate(texcoords):
+            uvloop.data[n].uv = f
 
 
         obj = bpy.data.objects.new('%s_Object' % meshname, msh)
@@ -412,11 +398,10 @@ def CreateBlenderMesh(filename, objname):
         scn.objects.active = obj
         scn.update()
 
+        #vertex groups
         if bone_link >=0 :
             grp = obj.vertex_groups.new(bone_names[bone_link])
             grp.add(list(range(len(msh.vertices))),1.0,'REPLACE')
-
-
         for name in vgroups.keys():
             grp = obj.vertex_groups.new(name)
             for (v, w) in vgroups[name]:
@@ -638,8 +623,8 @@ def readclip(filepath):
     objName = bpy.path.display_name_from_filepath(filepath)
     CreateBlenderClip(filepath, objName)
 
-def read(filepath):
+def read(filepath,flipuv):
     objName = bpy.path.display_name_from_filepath(filepath)
-    CreateBlenderMesh(filepath, objName)
+    CreateBlenderMesh(filepath, objName,flipuv)
 
 # package manages registering
