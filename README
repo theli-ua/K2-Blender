@@ -1,0 +1,4 @@
+TODO(?):
+    vertex colors import/export
+    SURFs
+    two-sided faces? (detect+merge on import, split on export)
