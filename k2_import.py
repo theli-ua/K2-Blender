@@ -371,7 +371,7 @@ def CreateBlenderMesh(filename, objname,flipuv):
         msh.update()
 
            
-        #msh.materials.append(bpy.data.materials.new(materialname))
+        msh.materials.append(bpy.data.materials.new(materialname))
 
         if flipuv:
             for t in range(len(texc)):

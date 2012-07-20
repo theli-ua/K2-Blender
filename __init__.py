@@ -71,10 +71,15 @@ class K2Importer(bpy.types.Operator):
             subtype='FILE_PATH',
             )
     filter_glob = StringProperty(default="*.model", options={'HIDDEN'})
+    flipuv = BoolProperty(
+            name="Flip UV",
+            description="Flip UV",
+            default=True,
+            )
 
     def execute(self, context):
         from . import k2_import
-        k2_import.read(self.filepath)
+        k2_import.read(self.filepath,self.flipuv)
         return {'FINISHED'}
 
     def invoke(self, context, event):
