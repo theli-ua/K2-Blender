@@ -124,6 +124,22 @@ def parse_colr(honchunk):
     meshindex = read_int(honchunk)
     return [struct.unpack("<4B", honchunk.read(4)) for i in range(numverts)]
 
+
+def parse_surf(honchunk):
+    vlog('parsing surf chunk')
+    surfindex = read_int(honchunk)
+    num_planes = read_int(honchunk)
+    num_points = read_int(honchunk)
+    num_edges = read_int(honchunk)
+    num_tris = read_int(honchunk)
+    #BMINf,BMAXf,FLAGSi
+    honchunk.read(4*3+4*3+4)
+    return \
+            [struct.unpack("<4f", honchunk.read(4*4)) for i in range(num_planes)],\
+            [struct.unpack("<3f", honchunk.read(4*3)) for i in range(num_points)],\
+            [struct.unpack("<6f", honchunk.read(4*6)) for i in range(num_edges)],\
+            [struct.unpack("<3I", honchunk.read(4*3)) for i in range(num_tris)]
+
 def roundVector(vec,dec=17):
     fvec=[]
     for v in vec:
@@ -298,6 +314,10 @@ def CreateBlenderMesh(filename, objname,flipuv):
         nrml = []
         texc = []
         colors = []
+        surf_planes = []
+        surf_points = []
+        surf_edges = []
+        surf_tris = []
         #read mesh chunk
         vlog("mesh index: %d" % read_int(honchunk))
         mode = 1
@@ -360,6 +380,14 @@ def CreateBlenderMesh(filename, objname,flipuv):
                     vgroups = parse_links(honchunk,bone_names)
                 elif honchunk.getname() == b'sign':
                     signs = parse_sign(honchunk)
+                elif honchunk.getname() == b'surf':
+                    surf_planes,surf_points,surf_edges,surf_tris = parse_surf(honchunk)
+                    print(surf_planes)
+                    print(surf_points)
+                    print(surf_edges)
+                    print(surf_tris)
+                elif honchunk.getname() == b'tang':
+                    honchunk.skip()
                 else:
                     vlog('unknown chunk: %s' % honchunk.chunkname)
                     honchunk.skip()
