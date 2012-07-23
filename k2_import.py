@@ -307,7 +307,7 @@ def CreateBlenderMesh(filename, objname,flipuv):
     except EOFError:
         log('error reading mesh chunk')
         return
-    while honchunk.getname() == b'mesh':
+    while honchunk and honchunk.getname() in [b'mesh', b'surf']:
         verts = []
         faces = []
         signs = []
@@ -318,79 +318,93 @@ def CreateBlenderMesh(filename, objname,flipuv):
         surf_points = []
         surf_edges = []
         surf_tris = []
-        #read mesh chunk
-        vlog("mesh index: %d" % read_int(honchunk))
-        mode = 1
-        if version == 3:
-            mode = read_int(honchunk)
-            vlog("mode: %d" % mode)
-            vlog("vertices count: %d" % read_int(honchunk))
-            vlog("bounding box: (%f,%f,%f) - (%f,%f,%f)" % \
-                struct.unpack("<ffffff", honchunk.read(24)))
-            bone_link = read_int(honchunk)
-            vlog("bone link: %d" % bone_link)
-            sizename = struct.unpack('B',honchunk.read(1))[0]
-            sizemat = struct.unpack('B',honchunk.read(1))[0]
-            meshname = honchunk.read(sizename)
-            honchunk.read(1) # zero
-            materialname = honchunk.read(sizemat)
-        elif version == 1:
-            bone_link = -1
-            pos = honchunk.tell() - 4
-            b = honchunk.read(1)
-            meshname = ''
-            while b != '\0':
-                meshname += b
+        if honchunk.getname() == b'mesh':
+            surf = False
+            #read mesh chunk
+            vlog("mesh index: %d" % read_int(honchunk))
+            mode = 1
+            if version == 3:
+                mode = read_int(honchunk)
+                vlog("mode: %d" % mode)
+                vlog("vertices count: %d" % read_int(honchunk))
+                vlog("bounding box: (%f,%f,%f) - (%f,%f,%f)" % \
+                    struct.unpack("<ffffff", honchunk.read(24)))
+                bone_link = read_int(honchunk)
+                vlog("bone link: %d" % bone_link)
+                sizename = struct.unpack('B',honchunk.read(1))[0]
+                sizemat = struct.unpack('B',honchunk.read(1))[0]
+                meshname = honchunk.read(sizename)
+                honchunk.read(1) # zero
+                materialname = honchunk.read(sizemat)
+            elif version == 1:
+                bone_link = -1
+                pos = honchunk.tell() - 4
                 b = honchunk.read(1)
-            honchunk.seek(pos + 0x24)
+                meshname = ''
+                while b != '\0':
+                    meshname += b
+                    b = honchunk.read(1)
+                honchunk.seek(pos + 0x24)
 
-            b = honchunk.read(1)
-            materialname = ''
-            while b != '\0':
-                materialname += b
                 b = honchunk.read(1)
+                materialname = ''
+                while b != '\0':
+                    materialname += b
+                    b = honchunk.read(1)
 
-        honchunk.skip()
+            honchunk.skip()
 
-        meshname = meshname.decode()
-        materialname = materialname.decode()
-
-        while 1:
+            meshname = meshname.decode()
+            materialname = materialname.decode()
+            while 1:
+                try:
+                    honchunk = chunk.Chunk(file,bigendian=0,align=0)
+                except EOFError:
+                    vlog('done reading chunks')
+                    honchunk = None
+                    break
+                if honchunk.getname()  in [b'mesh', b'surf']:
+                    break
+                elif mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
+                    honchunk.skip()
+                else:
+                    if honchunk.getname() == b'vrts':
+                        verts = parse_vertices(honchunk)
+                    elif honchunk.getname() == b'face':
+                        faces = parse_faces(honchunk,version)
+                    elif honchunk.getname() == b'nrml':
+                        nrml = parse_normals(honchunk)
+                    elif honchunk.getname() == b'texc':
+                        texc = parse_texc(honchunk,version)
+                    elif honchunk.getname() == b'colr':
+                        colors = parse_colr(honchunk)
+                    elif honchunk.getname() == b'lnk1' or honchunk.getname() == b'lnk3':
+                        vgroups = parse_links(honchunk,bone_names)
+                    elif honchunk.getname() == b'sign':
+                        signs = parse_sign(honchunk)
+                    elif honchunk.getname() == b'tang':
+                        honchunk.skip()
+                    else:
+                        vlog('unknown chunk: %s' % honchunk.chunkname)
+                        honchunk.skip()
+        elif honchunk.getname() == b'surf':
+            surf_planes,surf_points,surf_edges,surf_tris = parse_surf(honchunk)
+            print(surf_planes)
+            print(surf_points)
+            print(surf_edges)
+            print(surf_tris)
+            verts = surf_points
+            faces = surf_tris
+            surf = True
+            meshname = objname + '_surf'
+            honchunk.skip()
+            mode = 1
             try:
                 honchunk = chunk.Chunk(file,bigendian=0,align=0)
             except EOFError:
-                vlog('error reading chunk')
-                break
-            if honchunk.getname() == b'mesh':
-                break
-            elif mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
-                honchunk.skip()
-            else:
-                if honchunk.getname() == b'vrts':
-                    verts = parse_vertices(honchunk)
-                elif honchunk.getname() == b'face':
-                    faces = parse_faces(honchunk,version)
-                elif honchunk.getname() == b'nrml':
-                    nrml = parse_normals(honchunk)
-                elif honchunk.getname() == b'texc':
-                    texc = parse_texc(honchunk,version)
-                elif honchunk.getname() == b'colr':
-                    colors = parse_colr(honchunk)
-                elif honchunk.getname() == b'lnk1' or honchunk.getname() == b'lnk3':
-                    vgroups = parse_links(honchunk,bone_names)
-                elif honchunk.getname() == b'sign':
-                    signs = parse_sign(honchunk)
-                elif honchunk.getname() == b'surf':
-                    surf_planes,surf_points,surf_edges,surf_tris = parse_surf(honchunk)
-                    print(surf_planes)
-                    print(surf_points)
-                    print(surf_edges)
-                    print(surf_tris)
-                elif honchunk.getname() == b'tang':
-                    honchunk.skip()
-                else:
-                    vlog('unknown chunk: %s' % honchunk.chunkname)
-                    honchunk.skip()
+                vlog('done reading chunks')
+                honchunk = None
+
         if mode != 1 and False:#SKIP_NON_PHYSIQUE_MESHES:
             continue
         
@@ -399,25 +413,27 @@ def CreateBlenderMesh(filename, objname,flipuv):
         msh.update()
 
            
-        msh.materials.append(bpy.data.materials.new(materialname))
+        if materialname is not None:
+            msh.materials.append(bpy.data.materials.new(materialname))
 
-        if flipuv:
-            for t in range(len(texc)):
-                texc[t] = ( texc[t][0], 1-texc[t][1] )
+        if len(texc) > 0:
+            if flipuv:
+                for t in range(len(texc)):
+                    texc[t] = ( texc[t][0], 1-texc[t][1] )
 
 
-        # Generate texCoords for faces
-        texcoords = []
-        for face in faces:
-            texcoords.extend( [ texc[vert_id] for vert_id in face ] )
-            
-        #uvMain = createTextureLayer("UVMain", msh, texcoords)
-                        
-        uvtex = msh.uv_textures.new()
-        uvtex.name = 'UVMain' + meshname
-        uvloop = msh.uv_layers[-1]
-        for n,f in enumerate(texcoords):
-            uvloop.data[n].uv = f
+            # Generate texCoords for faces
+            texcoords = []
+            for face in faces:
+                texcoords.extend( [ texc[vert_id] for vert_id in face ] )
+                
+            #uvMain = createTextureLayer("UVMain", msh, texcoords)
+                            
+            uvtex = msh.uv_textures.new()
+            uvtex.name = 'UVMain' + meshname
+            uvloop = msh.uv_layers[-1]
+            for n,f in enumerate(texcoords):
+                uvloop.data[n].uv = f
 
 
         obj = bpy.data.objects.new('%s_Object' % meshname, msh)
@@ -426,37 +442,40 @@ def CreateBlenderMesh(filename, objname,flipuv):
         scn.objects.active = obj
         scn.update()
 
-        #vertex groups
-        if bone_link >=0 :
-            grp = obj.vertex_groups.new(bone_names[bone_link])
-            grp.add(list(range(len(msh.vertices))),1.0,'REPLACE')
-        for name in vgroups.keys():
-            grp = obj.vertex_groups.new(name)
-            for (v, w) in vgroups[name]:
-                grp.add([v], w, 'REPLACE')
-        
-        mod = obj.modifiers.new('MyRigModif', 'ARMATURE')
-        mod.object = rig
-        mod.use_bone_envelopes = False
-        mod.use_vertex_groups = True
+        if surf or mode != 1:
+            obj.draw_type = 'WIRE'
+        else:
+            #vertex groups
+            if bone_link >=0 :
+                grp = obj.vertex_groups.new(bone_names[bone_link])
+                grp.add(list(range(len(msh.vertices))),1.0,'REPLACE')
+            for name in vgroups.keys():
+                grp = obj.vertex_groups.new(name)
+                for (v, w) in vgroups[name]:
+                    grp.add([v], w, 'REPLACE')
+            
+            mod = obj.modifiers.new('MyRigModif', 'ARMATURE')
+            mod.object = rig
+            mod.use_bone_envelopes = False
+            mod.use_vertex_groups = True
 
 
-        if False:#removedoubles:
-            obj.select = True
-            bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-            bpy.ops.mesh.remove_doubles()
+            if False:#removedoubles:
+                obj.select = True
+                bpy.ops.object.mode_set(mode='EDIT', toggle=False)
+                bpy.ops.mesh.remove_doubles()
+                bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
+                obj.select = False
+
+
+            bpy.context.scene.objects.active = rig
+            rig.select = True
+            bpy.ops.object.mode_set(mode='POSE', toggle=False)
+            pose = rig.pose
+            for b in pose.bones:
+                b.rotation_mode = "QUATERNION"
             bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
-            obj.select = False
-
-
-        bpy.context.scene.objects.active = rig
-        rig.select = True
-        bpy.ops.object.mode_set(mode='POSE', toggle=False)
-        pose = rig.pose
-        for b in pose.bones:
-            b.rotation_mode = "QUATERNION"
-        bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
-        rig.select = False
+            rig.select = False
         bpy.context.scene.objects.active = None
 
 
